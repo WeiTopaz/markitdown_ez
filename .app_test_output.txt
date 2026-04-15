@@ -1,0 +1,3 @@
+MarkItDown EZ 啟動於 http://127.0.0.1:64877
+ * Serving Flask app 'app'
+ * Debug mode: off

@@ -1,0 +1,8 @@
+{
+  "project": "MarkItDown EZ",
+  "version": "1.0",
+  "features": [
+    "convert",
+    "preview"
+  ]
+}

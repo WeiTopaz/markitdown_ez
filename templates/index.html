@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MarkItDown EZ</title>
+<script src="/static/purify.min.js"></script>
+<style>
+/* ===== Reset & Base ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Morandi palette */
+  --bg:        #f4f1ec;
+  --card:      #ffffff;
+  --border:    #d5cec5;
+  --text:      #4a4540;
+  --text-sub:  #8a837a;
+  --accent:    #8fa8a0;   /* 灰綠 */
+  --accent-h:  #7a968d;
+  --pink:      #c4a9a1;   /* 灰粉 */
+  --blue:      #9badb8;   /* 灰藍 */
+  --danger:    #c48a7f;
+  --success:   #8fa8a0;
+  --radius:    14px;
+  --shadow:    0 2px 12px rgba(74,69,64,.08);
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans TC", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem 1rem;
+}
+
+h1 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  margin-bottom: .25rem;
+}
+
+.subtitle {
+  color: var(--text-sub);
+  font-size: .85rem;
+  margin-bottom: 1.5rem;
+}
+
+/* ===== Layout ===== */
+.container {
+  width: 100%;
+  max-width: 720px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+/* ===== Drop Zone ===== */
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 2.5rem 1rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .2s, background .2s;
+  position: relative;
+}
+.dropzone.dragover {
+  border-color: var(--accent);
+  background: rgba(143,168,160,.08);
+}
+.dropzone-icon {
+  font-size: 2.2rem;
+  margin-bottom: .5rem;
+  display: block;
+}
+.dropzone-text {
+  color: var(--text-sub);
+  font-size: .9rem;
+  line-height: 1.6;
+}
+.dropzone-text strong {
+  color: var(--accent);
+  cursor: pointer;
+}
+/* browseBtn: 語意改為 button，重置預設樣式後繼承強調色 */
+#browseBtn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: text-decoration-color .15s;
+}
+#browseBtn:hover,
+#browseBtn:focus-visible {
+  text-decoration-color: var(--accent);
+  outline: none;
+}
+#fileInput { display: none; }
+
+.file-info {
+  margin-top: .75rem;
+  font-size: .85rem;
+  color: var(--text);
+  display: none;
+  align-items: center;
+  gap: .5rem;
+}
+.file-info.show { display: flex; }
+.file-info .name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-info .remove {
+  color: var(--danger);
+  cursor: pointer;
+  font-size: .8rem;
+  border: none;
+  background: none;
+}
+
+/* ===== Formats badge ===== */
+.formats-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  margin-top: .75rem;
+  justify-content: center;
+}
+.badge {
+  font-size: .7rem;
+  padding: .15rem .55rem;
+  border-radius: 999px;
+  background: rgba(143,168,160,.13);
+  color: var(--accent-h);
+}
+
+/* ===== Convert Button ===== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .4rem;
+  border: none;
+  border-radius: 10px;
+  padding: .65rem 1.6rem;
+  font-size: .95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .2s, opacity .2s;
+}
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  width: 100%;
+  margin-top: 1rem;
+}
+.btn-primary:hover:not(:disabled) { background: var(--accent-h); }
+.btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+
+.btn-secondary {
+  background: rgba(155,173,184,.15);
+  color: var(--text);
+  padding: .45rem 1rem;
+  font-size: .82rem;
+}
+.btn-secondary:hover { background: rgba(155,173,184,.28); }
+
+/* ===== Spinner ===== */
+.spinner {
+  display: inline-block;
+  width: 1rem; height: 1rem;
+  border: 2px solid rgba(255,255,255,.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===== Result Area ===== */
+#resultCard { display: none; }
+#resultCard.show { display: block; }
+
+.result-toolbar {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .75rem;
+  flex-wrap: wrap;
+}
+.result-toolbar h2 {
+  font-size: 1rem;
+  flex: 1;
+}
+
+.tab-group {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.tab-btn {
+  border: none;
+  background: transparent;
+  padding: .3rem .75rem;
+  font-size: .78rem;
+  cursor: pointer;
+  color: var(--text-sub);
+  transition: background .15s;
+}
+.tab-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.result-content {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  max-height: 60vh;
+  overflow: auto;
+  font-size: .85rem;
+  line-height: 1.65;
+}
+.result-content pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: .82rem;
+}
+
+/* rendered markdown basic styles */
+.result-content.rendered h1,
+.result-content.rendered h2,
+.result-content.rendered h3 { margin: .8rem 0 .4rem; }
+.result-content.rendered table { border-collapse: collapse; width: 100%; margin: .5rem 0; }
+.result-content.rendered th,
+.result-content.rendered td { border: 1px solid var(--border); padding: .35rem .6rem; text-align: left; font-size: .82rem; }
+.result-content.rendered th { background: rgba(143,168,160,.1); }
+.result-content.rendered blockquote { border-left: 3px solid var(--accent); padding-left: .8rem; color: var(--text-sub); margin: .5rem 0; }
+.result-content.rendered code { background: rgba(0,0,0,.05); padding: .1rem .35rem; border-radius: 4px; font-size: .82rem; }
+.result-content.rendered pre { background: rgba(0,0,0,.04); border: 1px solid var(--border); border-radius: 8px; padding: .75rem 1rem; overflow-x: auto; margin: .5rem 0; }
+.result-content.rendered pre code { background: none; padding: 0; font-family: "SF Mono","Fira Code","Consolas",monospace; }
+.result-content.rendered img { max-width: 100%; }
+.result-content.rendered ul,
+.result-content.rendered ol { margin: .5rem 0 .5rem 1.5rem; }
+.result-content.rendered li { margin-bottom: .2rem; line-height: 1.6; }
+.result-content.rendered a { color: var(--accent); text-decoration: underline; word-break: break-all; }
+
+/* ===== Error ===== */
+.error-msg {
+  background: rgba(196,138,127,.1);
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  padding: .75rem 1rem;
+  color: var(--danger);
+  font-size: .85rem;
+  margin-top: .75rem;
+  display: none;
+}
+.error-msg.show { display: block; }
+
+/* ===== Footer ===== */
+footer {
+  margin-top: auto;
+  padding-top: 2rem;
+  font-size: .75rem;
+  color: var(--text-sub);
+}
+footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div style="text-align:center;">
+    <h1>MarkItDown EZ</h1>
+    <p class="subtitle">將檔案轉換為 Markdown — 離線可用</p>
+  </div>
+
+  <!-- Upload Card -->
+  <div class="card">
+    <div class="dropzone" id="dropzone" role="button" aria-label="拖放或點擊選擇要轉換的檔案" tabindex="0">
+      <span class="dropzone-icon">&#128196;</span>
+      <div class="dropzone-text">
+        拖放檔案到此處，或 <label for="fileInput" id="browseBtn">瀏覽選取</label>
+      </div>
+      <input type="file" id="fileInput">
+      <div id="formatBadges" class="formats-row"></div>
+    </div>
+
+    <div class="file-info" id="fileInfo">
+      <span>&#128206;</span>
+      <span class="name" id="fileName"></span>
+      <span id="fileSize" style="color:var(--text-sub);"></span>
+      <button class="remove" id="removeFile" title="移除檔案">&#10005;</button>
+    </div>
+
+    <div class="error-msg" id="errorMsg" role="alert" aria-live="assertive"></div>
+
+    <button class="btn btn-primary" id="convertBtn" disabled>
+      <span id="btnLabel">轉換為 Markdown</span>
+    </button>
+  </div>
+
+  <!-- Result Card -->
+  <div class="card" id="resultCard" role="region" aria-label="轉換結果" aria-live="polite">
+    <div class="result-toolbar">
+      <h2 id="resultTitle">轉換結果</h2>
+      <div class="tab-group">
+        <button class="tab-btn active" data-tab="raw">原始文字</button>
+        <button class="tab-btn" data-tab="rendered">預覽</button>
+      </div>
+      <button class="btn btn-secondary" id="downloadBtn">&#11015; 下載 .md</button>
+    </div>
+    <div class="result-content" id="resultContent">
+      <pre id="rawContent"></pre>
+      <div id="renderedContent" style="display:none;"></div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  Powered by <a href="https://github.com/microsoft/markitdown" target="_blank" rel="noopener">markitdown</a>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- DOM refs ---------- */
+  const dropzone    = document.getElementById("dropzone");
+  const fileInput   = document.getElementById("fileInput");
+  const browseBtn   = document.getElementById("browseBtn");
+  const fileInfo    = document.getElementById("fileInfo");
+  const fileName    = document.getElementById("fileName");
+  const fileSize    = document.getElementById("fileSize");
+  const removeFile  = document.getElementById("removeFile");
+  const convertBtn  = document.getElementById("convertBtn");
+  const btnLabel    = document.getElementById("btnLabel");
+  const errorMsg    = document.getElementById("errorMsg");
+  const resultCard  = document.getElementById("resultCard");
+  const resultTitle = document.getElementById("resultTitle");
+  const resultContent   = document.getElementById("resultContent");
+  const rawContent      = document.getElementById("rawContent");
+  const renderedContent = document.getElementById("renderedContent");
+  const downloadBtn = document.getElementById("downloadBtn");
+  const formatBadges = document.getElementById("formatBadges");
+
+  let selectedFile = null;
+  let lastMarkdown = "";
+  let lastFilename = "";
+  let maxSizeBytes = 50 * 1024 * 1024;
+  let supportedExts = [];
+  let currentTab = "raw";
+
+  /* ---------- Load formats ---------- */
+  fetch("/formats")
+    .then(r => r.json())
+    .then(data => {
+      maxSizeBytes = data.max_size_bytes || maxSizeBytes;
+      const exts = [];
+      data.formats.forEach(f => {
+        f.extensions.forEach(ext => exts.push(ext));
+        const badge = document.createElement("span");
+        badge.className = "badge";
+        badge.textContent = f.label;
+        formatBadges.appendChild(badge);
+      });
+      supportedExts = exts;
+      /* set accepted file types on input */
+      fileInput.setAttribute("accept", exts.join(","));
+    })
+    .catch(() => { /* formats endpoint failed — still usable */ });
+
+  /* ---------- Helpers ---------- */
+  function humanSize(bytes) {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  function showError(msg) {
+    errorMsg.textContent = msg;
+    errorMsg.classList.add("show");
+  }
+  function hideError() { errorMsg.classList.remove("show"); }
+
+  function setFile(file) {
+    hideError();
+    if (!file) return;
+
+    /* size check */
+    if (file.size > maxSizeBytes) {
+      showError("檔案大小超過限制（上限 " + humanSize(maxSizeBytes) + "）。");
+      return;
+    }
+
+    /* extension check */
+    const dot = file.name.lastIndexOf(".");
+    const ext = dot >= 0 ? file.name.slice(dot).toLowerCase() : "";
+    if (supportedExts.length > 0 && !supportedExts.includes(ext)) {
+      showError("不支援的格式：" + ext + "。支援的格式：" + supportedExts.join(", "));
+      return;
+    }
+
+    selectedFile = file;
+    lastMarkdown = "";
+    lastFilename = "";
+    resultCard.classList.remove("show");
+    fileName.textContent = file.name;
+    fileSize.textContent = "(" + humanSize(file.size) + ")";
+    fileInfo.classList.add("show");
+    convertBtn.disabled = false;
+  }
+
+  function clearFile() {
+    selectedFile = null;
+    fileInput.value = "";
+    fileInfo.classList.remove("show");
+    convertBtn.disabled = true;
+    hideError();
+    lastMarkdown = "";
+    lastFilename = "";
+    resultCard.classList.remove("show");
+  }
+
+  /* ---------- Drag & Drop ---------- */
+  dropzone.addEventListener("dragover", e => { e.preventDefault(); dropzone.classList.add("dragover"); });
+  dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+  /* 鍵盤 Enter / Space 開啟 file dialog（配合 role="button" + tabindex）*/
+  dropzone.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.click(); }
+  });
+  dropzone.addEventListener("drop", e => {
+    e.preventDefault();
+    dropzone.classList.remove("dragover");
+    const files = e.dataTransfer.files;
+    if (files.length > 0) setFile(files[0]);
+  });
+
+  browseBtn.addEventListener("click", e => { e.stopPropagation(); });
+  /* dropzone click：browseBtn 已呼叫 stopPropagation，不會冒泡到此；
+   * 其餘在 dropzone 內的任意位置（icon、badge、文字）點擊均應開啟選檔對話框。*/
+  dropzone.addEventListener("click", () => { fileInput.click(); });
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files.length > 0) setFile(fileInput.files[0]);
+  });
+  removeFile.addEventListener("click", e => { e.stopPropagation(); clearFile(); });
+
+  /* ---------- Convert ---------- */
+  convertBtn.addEventListener("click", async () => {
+    if (!selectedFile) return;
+    hideError();
+    resultCard.classList.remove("show");
+
+    /* loading state */
+    convertBtn.disabled = true;
+    btnLabel.innerHTML = '<span class="spinner"></span> 轉換中…';
+
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+
+    try {
+      const resp = await fetch("/convert", { method: "POST", body: formData });
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        showError(data.error || "轉換失敗（HTTP " + resp.status + "）");
+        return;
+      }
+
+      lastMarkdown = data.markdown || "";
+      lastFilename = data.filename || "output.md";
+      resultTitle.textContent = "轉換結果 — " + lastFilename;
+      showResult("raw");
+      resultCard.classList.add("show");
+      resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    } catch (err) {
+      showError("連線失敗：" + err.message);
+    } finally {
+      btnLabel.textContent = "轉換為 Markdown";
+      convertBtn.disabled = false;
+    }
+  });
+
+  /* ---------- Tabs ---------- */
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      showResult(btn.dataset.tab);
+    });
+  });
+
+  function showResult(tab) {
+    currentTab = tab;
+    if (tab === "raw") {
+      resultContent.classList.remove("rendered");
+      rawContent.style.display = "";
+      renderedContent.style.display = "none";
+      rawContent.textContent = lastMarkdown;
+    } else {
+      resultContent.classList.add("rendered");
+      rawContent.style.display = "none";
+      renderedContent.style.display = "";
+      /* XSS protection: sanitize rendered HTML
+       * 寫入獨立的 renderedContent，避免 innerHTML 賦值銷毀 rawContent 節點，
+       * 導致切回「原始文字」tab 時畫面空白。 */
+      const rawHtml = simpleMarkdownToHtml(lastMarkdown);
+      renderedContent.innerHTML = DOMPurify.sanitize(rawHtml);
+    }
+  }
+
+  /* ---------- Minimal Markdown→HTML (for preview only) ---------- */
+  function simpleMarkdownToHtml(md) {
+    let html = md;
+
+    /* ── Step 1: 先抽取 fenced code block（``` ... ```）───────────────
+     * 必須在 HTML escape 之前進行，並對 code 內容獨立 escape，
+     * 否則後續的 bold/italic regex 會污染 code block 內的 * 字元。
+     * 使用 U+0000 null byte 作為 placeholder（不會出現在正常 markdown）。*/
+    const codeBlocks = [];
+    html = html.replace(/^```[^\n]*\n([\s\S]*?)^```[ \t]*$/gm, (_, code) => {
+      const escaped = code
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      codeBlocks.push("<pre><code>" + escaped + "</code></pre>");
+      return "\x00CB" + (codeBlocks.length - 1) + "\x00";
+    });
+
+    /* ── Step 2: escape HTML（fenced block 已替換為 placeholder）──── */
+    html = html.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    /* ── Step 3: 抽取 inline code 並用 placeholder 保護────────────────
+     * 必須在 bold/italic 之前進行，避免 `*code*` 被錯誤轉成
+     * <code><em>code</em></code>。
+     * 此時 html 已 HTML-escaped，code 內容直接放入 placeholder 即可。*/
+    const inlineCodes = [];
+    html = html.replace(/`([^`\n]+)`/g, (_, code) => {
+      inlineCodes.push("<code>" + code + "</code>");
+      return "\x00IC" + (inlineCodes.length - 1) + "\x00";
+    });
+
+    /* ── Step 4: 一般行內元素 ────────────────────────────────────────── */
+    /* headings */
+    html = html.replace(/^######\s+(.+)$/gm, "<h6>$1</h6>");
+    html = html.replace(/^#####\s+(.+)$/gm, "<h5>$1</h5>");
+    html = html.replace(/^####\s+(.+)$/gm, "<h4>$1</h4>");
+    html = html.replace(/^###\s+(.+)$/gm, "<h3>$1</h3>");
+    html = html.replace(/^##\s+(.+)$/gm, "<h2>$1</h2>");
+    html = html.replace(/^#\s+(.+)$/gm, "<h1>$1</h1>");
+    /* blockquote: > text 或 >text（注意：> 已被 escape 成 &gt;；CommonMark 允許省略空格）*/
+    html = html.replace(/^&gt;\s*(.+)$/gm, "<blockquote>$1</blockquote>");
+    /* bold & italic（inline code placeholder 不含 * 所以不受影響）*/
+    html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
+    /* links [text](url) — DOMPurify 會在最後做 XSS 清理 */
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    /* horizontal rule */
+    html = html.replace(/^---+$/gm, "<hr>");
+
+    /* ── Step 5: 表格與清單 ──────────────────────────────────────────── */
+    html = convertTables(html);
+    /* 移除 <table>…</table> 內部的換行，避免後續 \n→<br> 把換行插入表格結構，
+     * 導致瀏覽器觸發 foster-parenting、表格前出現多餘空行。 */
+    html = html.replace(/(<table>[\s\S]*?<\/table>)/g, m => m.replace(/\n/g, ""));
+    html = convertLists(html);
+
+    /* ── Step 6: 換行處理 ─────────────────────────────────────────────── */
+    html = html.replace(/\n\n+/g, "</p><p>");
+    html = html.replace(/\n/g, "<br>");
+    html = "<p>" + html + "</p>";
+
+    /* ── Step 7: 清理 block 元素周邊多餘的 <p> ──────────────────────── */
+    html = html.replace(/<p>\s*(<h[1-6]>)/g, "$1");
+    html = html.replace(/(<\/h[1-6]>)\s*<\/p>/g, "$1");
+    html = html.replace(/<p>\s*(<hr>)\s*<\/p>/g, "$1");
+    html = html.replace(/<p>\s*(<table>)/g, "$1");
+    html = html.replace(/(<\/table>)\s*<\/p>/g, "$1");
+    html = html.replace(/<p>\s*(<[uo]l>)/g, "$1");
+    html = html.replace(/(<\/[uo]l>)\s*<\/p>/g, "$1");
+    html = html.replace(/<p>\s*(<blockquote>)/g, "$1");
+    html = html.replace(/(<\/blockquote>)\s*<\/p>/g, "$1");
+
+    /* ── Step 8: 還原 inline code placeholder ────────────────────────── */
+    html = html.replace(/\x00IC(\d+)\x00/g, (_, i) => inlineCodes[+i]);
+
+    /* ── Step 9: 還原 fenced code block placeholder ───────────────────
+     * 先拆掉 <p> wrapper，再插回 <pre><code>…</code></pre>。*/
+    html = html.replace(/<p>\s*(\x00CB\d+\x00)\s*<\/p>/g, "$1");
+    html = html.replace(/\x00CB(\d+)\x00/g, (_, i) => codeBlocks[+i]);
+
+    return html;
+  }
+
+  function convertTables(html) {
+    const lines = html.split("\n");
+    let result = [];
+    let inTable = false;
+    let headerDone = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith("|") && line.endsWith("|")) {
+        /* separator row: 每格須符合 :?-+:? 模式（含可選空格）*/
+        const sepCells = line.slice(1, -1).split("|");
+        if (sepCells.every(c => /^\s*:?-+:?\s*$/.test(c))) {
+          headerDone = true;
+          continue;
+        }
+        if (!inTable) {
+          inTable = true;
+          headerDone = false;
+          result.push("<table>");
+        }
+        const cells = line.slice(1, -1).split("|").map(c => c.trim());
+        const tag = !headerDone ? "th" : "td";
+        const row = "<tr>" + cells.map(c => "<" + tag + ">" + c + "</" + tag + ">").join("") + "</tr>";
+        result.push(row);
+        if (!headerDone) headerDone = true;
+      } else {
+        if (inTable) { result.push("</table>"); inTable = false; headerDone = false; }
+        result.push(lines[i]);
+      }
+    }
+    if (inTable) result.push("</table>");
+    return result.join("\n");
+  }
+
+  /* ---------- List conversion (unordered & ordered) ---------- */
+  function convertLists(html) {
+    const lines = html.split("\n");
+    const result = [];
+    let listType = null; // "ul" | "ol" | null
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      /* unordered: "- ", "* ", "+ " 開頭（前導空白允許，但不處理巢狀縮排）*/
+      const ulMatch = line.match(/^\s*[-*+]\s+(.+)$/);
+      /* ordered: "1. ", "2. " … 開頭 */
+      const olMatch = !ulMatch && line.match(/^\s*\d+\.\s+(.+)$/);
+
+      if (ulMatch) {
+        if (listType !== "ul") {
+          if (listType) result.push("</" + listType + ">");
+          result.push("<ul>");
+          listType = "ul";
+        }
+        result.push("<li>" + ulMatch[1] + "</li>");
+      } else if (olMatch) {
+        if (listType !== "ol") {
+          if (listType) result.push("</" + listType + ">");
+          result.push("<ol>");
+          listType = "ol";
+        }
+        result.push("<li>" + olMatch[1] + "</li>");
+      } else {
+        if (listType) {
+          result.push("</" + listType + ">");
+          listType = null;
+        }
+        result.push(line);
+      }
+    }
+    if (listType) result.push("</" + listType + ">");
+    return result.join("\n");
+  }
+
+  /* ---------- Heartbeat & Shutdown ---------- */
+  /* 方案 A: beforeunload → POST /shutdown */
+  window.addEventListener("beforeunload", () => {
+    navigator.sendBeacon("/shutdown");
+  });
+
+  /* 方案 B: 每 15s ping /heartbeat，讓後端知道前端還活著 */
+  setInterval(() => {
+    fetch("/heartbeat", { method: "POST" }).catch(() => {});
+  }, 15000);
+
+  /* ---------- Download ---------- */
+  downloadBtn.addEventListener("click", () => {
+    if (!lastMarkdown) return;
+    const blob = new Blob([lastMarkdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = lastFilename || "output.md";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+})();
+</script>
+</body>
+</html>
