@@ -107,6 +107,26 @@ build\build_win.bat
 pyinstaller markitdown_ez.spec --noconfirm --clean
 ```
 
+### 用 GitHub Actions 觸發正式 Release
+
+只要 push 一個符合 `v*.*.*` 格式的 tag，GitHub 就會自動執行 `.github/workflows/build.yml`：
+
+```bash
+git tag -a v1.0.1 -m "Release v1.0.1"
+git push origin v1.0.1
+```
+
+workflow 會自動完成以下工作：
+
+1. 在 **macOS runner** 打包 `MarkItDown-EZ-mac.zip`（內含 `MarkItDown EZ.app`）
+2. 在 **Windows runner** 打包 `MarkItDown-EZ-win.zip`（內含 `MarkItDown EZ.exe`）
+3. 自動建立對應的 **GitHub Release**，並把兩個 zip 當成附件上傳
+
+可在 GitHub 的 **Actions** 頁面查看建置進度，完成後到 **Releases** 頁面下載：
+
+- `MarkItDown-EZ-win.zip`
+- `MarkItDown-EZ-mac.zip`
+
 ---
 
 ## 專案結構
