@@ -23,23 +23,51 @@
 
 ---
 
-## 快速使用
+## 快速使用（推薦）
 
-### 直接執行（已打包版）
+> 不需安裝 Python，不需網路，下載即用。
 
-**macOS**
+### 步驟
 
-1. 從 `dist/` 取得 `MarkItDown EZ.app`
-2. 雙擊開啟，瀏覽器會自動彈出
-3. 拖曳或選擇檔案 → 點擊「轉換」→ 下載 `.md` 檔案
+1. 前往 [GitHub Releases](../../releases) 頁面
+2. 依平台下載對應檔案：
 
-**Windows**
+   | 平台 | 下載檔案 |
+   |------|---------|
+   | macOS | `MarkItDown-EZ-mac.zip` |
+   | Windows | `MarkItDown-EZ-win.zip` |
 
-1. 從 `dist/` 取得 `MarkItDown EZ/MarkItDown EZ.exe`
-2. 雙擊執行，瀏覽器會自動彈出
-3. 操作方式同上
+3. 解壓縮後執行：
+   - **macOS**：雙擊 `MarkItDown EZ.app`
+   - **Windows**：雙擊 `MarkItDown EZ.exe`
 
-### 從原始碼執行
+4. 瀏覽器自動開啟，拖曳或選擇檔案 → 點擊「轉換」→ 下載 `.md` 檔案
+
+---
+
+### macOS 首次開啟說明
+
+未經 Apple 公證的應用程式，第一次開啟時 macOS 會顯示安全警告。
+
+**方法一（推薦）**：右鍵點擊 `MarkItDown EZ.app` → 選擇「開啟」→ 點選「開啟」
+
+**方法二**（終端機）：
+```bash
+xattr -cr "MarkItDown EZ.app"
+```
+執行後即可正常雙擊開啟。
+
+---
+
+### Windows 首次執行說明
+
+首次執行 `.exe` 時，Windows SmartScreen 可能顯示「已保護您的電腦」警告。
+
+點選「**更多資訊**」→「**仍要執行**」即可。
+
+---
+
+## 從原始碼執行（開發用）
 
 ```bash
 # 建立虛擬環境並安裝依賴
@@ -56,54 +84,44 @@ python app.py
 
 ---
 
-## 打包說明
+## 打包發版（維護者）
 
-打包前請確認已啟用虛擬環境，且 `requirements.txt` 依賴均已安裝。
+在各自平台上執行打包腳本，產出可發布的 zip 檔案。
 
-### macOS → `.app`
-
+**macOS**（在 Mac 上執行）：
 ```bash
 bash build/build_mac.sh
 ```
+產出：`MarkItDown-EZ-mac.zip`（內含 `MarkItDown EZ.app`）
 
-產出位置：`dist/MarkItDown EZ.app`
-
-腳本會依序執行：
-1. 建立 / 啟用虛擬環境
-2. 安裝依賴及 PyInstaller
-3. 執行測試套件（通過才繼續）
-4. 呼叫 PyInstaller 打包為 `.app` bundle
-
-### Windows → `.exe`
-
+**Windows**（在 Windows 上執行）：
 ```bat
 build\build_win.bat
 ```
+產出：`MarkItDown-EZ-win.zip`（內含 `MarkItDown EZ\` 資料夾）
 
-產出位置：`dist\MarkItDown EZ\MarkItDown EZ.exe`
+腳本會依序：建立虛擬環境 → 安裝依賴 → 執行測試（失敗則中止）→ PyInstaller 打包 → 壓縮為 zip。
 
-### 手動使用 spec 檔打包
-
-如需細調打包設定（例如修改 Info.plist、圖示、額外 hiddenimports），可直接編輯 `markitdown_ez.spec` 後執行：
-
+手動調整打包設定（圖示、Info.plist、hiddenimports 等）：
 ```bash
 pyinstaller markitdown_ez.spec --noconfirm --clean
 ```
 
 ---
 
-## 開發說明
-
-### 專案結構
+## 專案結構
 
 ```
 markitdown_ez/
 ├── app.py                  # Flask 後端（唯一 Python 入口）
 ├── requirements.txt        # 依賴清單
 ├── markitdown_ez.spec      # PyInstaller 打包設定
+├── .github/
+│   └── workflows/
+│       └── build.yml       # CI/CD：build + release
 ├── build/
-│   ├── build_mac.sh        # macOS 打包腳本
-│   └── build_win.bat       # Windows 打包腳本
+│   ├── build_mac.sh        # macOS 本機打包腳本（備案）
+│   └── build_win.bat       # Windows 本機打包腳本（備案）
 ├── templates/
 │   └── index.html          # 前端單頁應用
 ├── static/
@@ -117,7 +135,9 @@ markitdown_ez/
     └── verify_markitdown_api.py
 ```
 
-### API 端點
+---
+
+## API 端點
 
 | 方法 | 路徑 | 說明 |
 |------|------|------|
@@ -144,36 +164,14 @@ curl -X POST http://127.0.0.1:PORT/convert \
 }
 ```
 
-### 執行測試
+---
+
+## 執行測試
 
 ```bash
 # 啟用虛擬環境後
 pytest tests/ -v --cov=app --cov-report=term-missing
 ```
-
-測試前請先確認 `tests/fixtures/` 下已有各格式的樣本檔。若尚未產生，可執行：
-
-```bash
-python tests/generate_fixtures.py
-```
-
-### 依賴更新
-
-修改 `requirements.txt` 後重新安裝：
-
-```bash
-pip install -r requirements.txt
-```
-
-目前核心依賴版本：
-
-| 套件 | 版本 |
-|------|------|
-| `markitdown[pdf,docx,pptx,xlsx]` | 0.1.5 |
-| `xlrd` | 2.0.2 |
-| `Flask` | 3.1.3 |
-| `pytest` | 9.0.3 |
-| `pytest-cov` | 7.1.0 |
 
 ---
 

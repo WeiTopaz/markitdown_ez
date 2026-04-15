@@ -3,7 +3,6 @@
 .agents/
 .cursor/
 .gemini/
-.github/
 .codex/
 .claude/
 CLAUDE.md
@@ -29,7 +28,10 @@ node_modules/
 
 # Build output
 dist/
-build/
+build/markitdown_ez/
+build/MarkItDown EZ/
+MarkItDown EZ.spec
+MarkItDown-EZ-*.zip
 
 # OS files
 .DS_Store

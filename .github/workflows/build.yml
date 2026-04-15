@@ -1,0 +1,136 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  # ─────────────────────────────────────────
+  # macOS Build
+  # ─────────────────────────────────────────
+  build-mac:
+    name: Build (macOS)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -q --tb=short
+
+      - name: Build .app with PyInstaller
+        run: |
+          pyinstaller markitdown_ez.spec --noconfirm --clean
+
+      - name: Zip .app bundle
+        run: |
+          cd dist
+          zip -r ../MarkItDown-EZ-mac.zip "MarkItDown EZ.app"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-build
+          path: MarkItDown-EZ-mac.zip
+          retention-days: 7
+
+  # ─────────────────────────────────────────
+  # Windows Build
+  # ─────────────────────────────────────────
+  build-win:
+    name: Build (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -q --tb=short
+
+      - name: Build .exe with PyInstaller
+        run: |
+          pyinstaller markitdown_ez.spec --noconfirm --clean
+
+      - name: Zip output folder
+        run: |
+          Compress-Archive -Path "dist\MarkItDown EZ" -DestinationPath MarkItDown-EZ-win.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-build
+          path: MarkItDown-EZ-win.zip
+          retention-days: 7
+
+  # ─────────────────────────────────────────
+  # GitHub Release
+  # ─────────────────────────────────────────
+  release:
+    name: Create Release
+    needs: [build-mac, build-win]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Mac artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mac-build
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: win-build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "MarkItDown EZ ${{ github.ref_name }}"
+          body: |
+            ## 下載
+
+            | 平台 | 檔案 |
+            |------|------|
+            | macOS | `MarkItDown-EZ-mac.zip` |
+            | Windows | `MarkItDown-EZ-win.zip` |
+
+            ## 使用方式
+
+            **macOS**：下載 zip → 解壓縮 → 雙擊 `MarkItDown EZ.app`
+            > 首次開啟若出現安全警告，請參閱 README 的「首次開啟說明」。
+
+            **Windows**：下載 zip → 解壓縮 → 雙擊 `MarkItDown EZ.exe`
+            > 首次執行若出現 SmartScreen 警告，請點選「更多資訊」→「仍要執行」。
+          files: |
+            MarkItDown-EZ-mac.zip
+            MarkItDown-EZ-win.zip
+          fail_on_unmatched_files: true
