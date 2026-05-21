@@ -1,6 +1,7 @@
 """MarkItDown EZ — Flask 後端（唯一 Python 入口）"""
 import os
 import signal
+import sys
 import tempfile
 import threading
 import time
@@ -16,6 +17,20 @@ _converter = MarkItDown()
 
 MAX_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
 app.config["MAX_CONTENT_LENGTH"] = MAX_SIZE_BYTES  # Flask 上傳限制
+
+# ---------- Watchdog 設定 ----------
+
+# 啟動寬限期：page_closed 模式啟動後此秒數內不偵測，給瀏覽器開啟與首次 ping 留時間。
+WATCHDOG_GRACE_SECONDS = 60
+# 每 N 秒輪詢一次。
+WATCHDOG_POLL_SECONDS = 10
+# 上次 ping 距今超過此秒數視為心跳已停。
+WATCHDOG_TIMEOUT_SECONDS = 30
+
+WATCHDOG_MODE_PAGE_CLOSED = "page_closed"
+WATCHDOG_MODE_TIMEOUT = "timeout"
+WATCHDOG_DEFAULT_MODE = WATCHDOG_MODE_PAGE_CLOSED
+WATCHDOG_ENV_VAR = "MARKITDOWN_WATCHDOG_MODE"
 
 SUPPORTED_FORMATS = {
     ".pdf": "PDF",
@@ -126,7 +141,11 @@ def too_large(e):
 
 # ---------- Graceful Shutdown ----------
 
-_last_heartbeat = None  # 由 __main__ 初始化
+# None 表示「服務啟動以來從未收到任何 /heartbeat」，是 page_closed 模式判斷
+# 「網頁從未開啟」的關鍵訊號。timeout 模式遇到 None 時應 skip，避免 None - float。
+_last_heartbeat = None
+# 服務啟動時間，由 start_watchdog 設定；用於 page_closed 模式的寬限期判斷。
+_service_start_ts = None
 
 
 @app.route("/shutdown", methods=["POST"])
@@ -147,11 +166,95 @@ def heartbeat():
     return jsonify({"status": "ok"})
 
 
+# ---------- Watchdog 判斷邏輯（pure helper，可單元測試）----------
+
+
+def _should_exit_page_closed(now, start_ts, last_heartbeat):
+    """page_closed 模式單輪判斷：True 表示應退出。
+
+    - 啟動寬限期內（now - start_ts < WATCHDOG_GRACE_SECONDS）一律不退，
+      避免使用者啟動服務但瀏覽器尚未送出第一次 ping 就被誤關。
+    - 寬限期過後若 last_heartbeat 仍為 None → 視同網頁從未開啟＝已關閉。
+    - 寬限期過後若 last_heartbeat 距今超過 WATCHDOG_TIMEOUT_SECONDS → 網頁已關。
+    """
+    if now - start_ts < WATCHDOG_GRACE_SECONDS:
+        return False
+    if last_heartbeat is None:
+        return True
+    return (now - last_heartbeat) > WATCHDOG_TIMEOUT_SECONDS
+
+
+def _should_exit_timeout(now, last_heartbeat):
+    """timeout 模式單輪判斷：True 表示應退出。
+
+    向下相容語意：last_heartbeat 為 None 時不退出（重構後初值為 None，
+    舊版本則被 __main__ 立即覆寫為 time.time()，行為等價）。
+    """
+    if last_heartbeat is None:
+        return False
+    return (now - last_heartbeat) > WATCHDOG_TIMEOUT_SECONDS
+
+
+def _exit_due_to(reason):
+    print(f"MarkItDown EZ：{reason}，自動退出。")
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+def _run_page_closed_watchdog():
+    """page_closed 模式 loop：寬限期 + 偵測網頁從未開啟或已關閉。"""
+    while True:
+        time.sleep(WATCHDOG_POLL_SECONDS)
+        now = time.time()
+        if now - _service_start_ts < WATCHDOG_GRACE_SECONDS:
+            continue
+        if _last_heartbeat is None:
+            _exit_due_to("偵測到網頁未開啟")
+            return
+        if (now - _last_heartbeat) > WATCHDOG_TIMEOUT_SECONDS:
+            _exit_due_to("偵測到網頁已關閉")
+            return
+
+
+def _run_timeout_watchdog():
+    """timeout 模式 loop：維持舊版「距上次 ping 超過 30 秒即關」行為。"""
+    while True:
+        time.sleep(WATCHDOG_POLL_SECONDS)
+        if _should_exit_timeout(time.time(), _last_heartbeat):
+            _exit_due_to("前端已關閉")
+            return
+
+
+def start_watchdog(mode):
+    """依模式啟動 watchdog daemon thread；回傳 (thread, normalized_mode)。
+
+    未知 mode 印 warning 並 fallback 至 page_closed。設定 _service_start_ts。
+    """
+    global _service_start_ts
+    normalized = (mode or "").strip().lower()
+    if normalized == WATCHDOG_MODE_PAGE_CLOSED:
+        target = _run_page_closed_watchdog
+    elif normalized == WATCHDOG_MODE_TIMEOUT:
+        target = _run_timeout_watchdog
+    else:
+        print(
+            f"MarkItDown EZ：未知 watchdog 模式 '{mode}'，fallback 至 "
+            f"{WATCHDOG_DEFAULT_MODE}。",
+            file=sys.stderr,
+        )
+        normalized = WATCHDOG_DEFAULT_MODE
+        target = _run_page_closed_watchdog
+
+    _service_start_ts = time.time()
+    print(f"MarkItDown EZ：watchdog 模式 = {normalized}")
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    return thread, normalized
+
+
 # ---------- 主入口 ----------
 
 if __name__ == "__main__":
     import socket
-    import sys
     import webbrowser
 
     # 自動選擇空閒 port
@@ -171,18 +274,8 @@ if __name__ == "__main__":
     # 延遲開啟瀏覽器，讓 Flask 有時間啟動
     threading.Timer(1.5, open_browser).start()
 
-    # 心跳監控（方案 B）：若超過 30s 未收到前端 ping，自動退出
-    _last_heartbeat = time.time()
-
-    def heartbeat_watchdog():
-        while True:
-            time.sleep(10)
-            if time.time() - _last_heartbeat > 30:
-                print("MarkItDown EZ：前端已關閉，自動退出。")
-                os.kill(os.getpid(), signal.SIGTERM)
-
-    watchdog = threading.Thread(target=heartbeat_watchdog, daemon=True)
-    watchdog.start()
+    mode = os.environ.get(WATCHDOG_ENV_VAR, WATCHDOG_DEFAULT_MODE)
+    start_watchdog(mode)
 
     print(f"MarkItDown EZ 啟動於 {url}")
     app.run(host="127.0.0.1", port=port, debug=False)

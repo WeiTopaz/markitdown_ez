@@ -195,6 +195,250 @@ class TestShutdownHeartbeat:
             mock_timer.return_value.start.assert_called_once()
 
 
+class TestWatchdogModes:
+    """Heartbeat watchdog 兩種模式的單輪判斷與分派器測試。
+
+    用 pure helper（`_should_exit_page_closed` / `_should_exit_timeout`）
+    驗真值表，避免進入 loop 的 sleep；用 mock `threading.Thread` 驗 dispatcher
+    分派與 unknown 模式 fallback。
+    """
+
+    # ---- page_closed 模式 helper ----
+
+    def test_page_closed_within_grace_skips(self):
+        """寬限期內（距 start_ts 30 秒 < 60）即使從未收到 ping 也不應退出。"""
+        from app import _should_exit_page_closed, WATCHDOG_GRACE_SECONDS
+        assert WATCHDOG_GRACE_SECONDS == 60
+        now = 1000.0
+        start_ts = now - 30  # 30 秒前啟動，仍在寬限期
+        assert _should_exit_page_closed(now, start_ts, None) is False
+
+    def test_page_closed_after_grace_no_heartbeat_exits(self):
+        """寬限期過後（距 start_ts 70 秒）且從未收到 ping → 應退出。"""
+        from app import _should_exit_page_closed
+        now = 1000.0
+        start_ts = now - 70
+        assert _should_exit_page_closed(now, start_ts, None) is True
+
+    def test_page_closed_after_grace_stale_heartbeat_exits(self):
+        """寬限期過後 ping 已停超過 30 秒 → 應退出。"""
+        from app import _should_exit_page_closed
+        now = 1000.0
+        start_ts = now - 120  # 早就過寬限期
+        last_hb = now - 45    # 上次 ping 在 45 秒前，超過 30 秒閾值
+        assert _should_exit_page_closed(now, start_ts, last_hb) is True
+
+    def test_page_closed_after_grace_fresh_heartbeat_skips(self):
+        """寬限期過後 ping 仍新鮮（5 秒前）→ 不應退出。"""
+        from app import _should_exit_page_closed
+        now = 1000.0
+        start_ts = now - 120
+        last_hb = now - 5
+        assert _should_exit_page_closed(now, start_ts, last_hb) is False
+
+    # ---- timeout 模式 helper（向下相容）----
+
+    def test_timeout_with_none_heartbeat_skips(self):
+        """舊模式遇到 _last_heartbeat is None（重構後初值）→ 不應退出，避免炸 None-arithmetic。"""
+        from app import _should_exit_timeout
+        assert _should_exit_timeout(1000.0, None) is False
+
+    def test_timeout_with_stale_heartbeat_exits(self):
+        """舊模式 ping 已停超過 30 秒 → 應退出（行為與舊版一致）。"""
+        from app import _should_exit_timeout, WATCHDOG_TIMEOUT_SECONDS
+        assert WATCHDOG_TIMEOUT_SECONDS == 30
+        now = 1000.0
+        last_hb = now - 45
+        assert _should_exit_timeout(now, last_hb) is True
+
+    # ---- dispatcher ----
+
+    def test_start_watchdog_dispatches_page_closed(self):
+        """mode='page_closed' → 啟動 thread 且 normalized 回 'page_closed'。"""
+        import unittest.mock as mock
+        from app import start_watchdog, WATCHDOG_MODE_PAGE_CLOSED
+        with mock.patch("app.threading.Thread") as mock_thread:
+            mock_thread.return_value = mock.MagicMock()
+            _, normalized = start_watchdog(WATCHDOG_MODE_PAGE_CLOSED)
+            assert normalized == "page_closed"
+            mock_thread.assert_called_once()
+            mock_thread.return_value.start.assert_called_once()
+
+    def test_start_watchdog_dispatches_timeout(self):
+        """mode='timeout' → normalized 回 'timeout'。"""
+        import unittest.mock as mock
+        from app import start_watchdog, WATCHDOG_MODE_TIMEOUT
+        with mock.patch("app.threading.Thread") as mock_thread:
+            mock_thread.return_value = mock.MagicMock()
+            _, normalized = start_watchdog(WATCHDOG_MODE_TIMEOUT)
+            assert normalized == "timeout"
+
+    def test_start_watchdog_unknown_mode_falls_back(self):
+        """未知 mode → fallback 至 page_closed，仍會啟動 thread。"""
+        import unittest.mock as mock
+        from app import start_watchdog
+        with mock.patch("app.threading.Thread") as mock_thread:
+            mock_thread.return_value = mock.MagicMock()
+            _, normalized = start_watchdog("bogus_mode")
+            assert normalized == "page_closed"
+            mock_thread.return_value.start.assert_called_once()
+
+
+class TestWatchdogLoop:
+    """Loop 函式整合測試：用 monkeypatch 控制 sleep/time/os.kill，
+    驗證 loop 真的會在 helper 回傳 True 時走到 os.kill 並終止。
+
+    helper 真值表已由 TestWatchdogModes 覆蓋；本類別補的是 loop 的
+    sleep → 評估 → 退出 控制流。
+    """
+
+    def test_page_closed_loop_exits_after_grace_no_heartbeat(self, monkeypatch):
+        """grace 後 None：第一輪 sleep 完即退出，os.kill 被呼叫一次 SIGTERM。"""
+        import signal
+        import app as app_module
+
+        kill_calls = []
+        sleep_calls = []
+
+        monkeypatch.setattr(app_module, "_service_start_ts", 0.0)
+        monkeypatch.setattr(app_module, "_last_heartbeat", None)
+        monkeypatch.setattr("time.time", lambda: 100.0)  # > 60s grace
+        monkeypatch.setattr("time.sleep", lambda s: sleep_calls.append(s))
+        monkeypatch.setattr("os.kill", lambda pid, sig: kill_calls.append((pid, sig)))
+
+        app_module._run_page_closed_watchdog()
+
+        assert sleep_calls == [app_module.WATCHDOG_POLL_SECONDS]
+        assert len(kill_calls) == 1
+        assert kill_calls[0][1] == signal.SIGTERM
+
+    def test_page_closed_loop_skips_within_grace(self, monkeypatch):
+        """grace 內：連續多輪 continue 不退；用 sleep counter 在 3 輪後拋例外跳出 loop。"""
+        import app as app_module
+
+        sleep_count = [0]
+        kill_calls = []
+
+        def fake_sleep(_):
+            sleep_count[0] += 1
+            if sleep_count[0] >= 3:
+                raise RuntimeError("STOP_LOOP")
+
+        monkeypatch.setattr(app_module, "_service_start_ts", 0.0)
+        monkeypatch.setattr(app_module, "_last_heartbeat", None)
+        monkeypatch.setattr("time.time", lambda: 30.0)  # < 60s grace
+        monkeypatch.setattr("time.sleep", fake_sleep)
+        monkeypatch.setattr("os.kill", lambda pid, sig: kill_calls.append((pid, sig)))
+
+        with pytest.raises(RuntimeError, match="STOP_LOOP"):
+            app_module._run_page_closed_watchdog()
+
+        assert sleep_count[0] == 3
+        assert kill_calls == []
+
+    def test_page_closed_loop_exits_when_heartbeat_stale(self, monkeypatch):
+        """grace 後曾收過 ping 但已停超過 30s：應退出。"""
+        import signal
+        import app as app_module
+
+        kill_calls = []
+        monkeypatch.setattr(app_module, "_service_start_ts", 0.0)
+        monkeypatch.setattr(app_module, "_last_heartbeat", 50.0)  # 50s 前 ping
+        monkeypatch.setattr("time.time", lambda: 100.0)            # 距 ping 50s > 30s
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        monkeypatch.setattr("os.kill", lambda pid, sig: kill_calls.append((pid, sig)))
+
+        app_module._run_page_closed_watchdog()
+
+        assert len(kill_calls) == 1
+        assert kill_calls[0][1] == signal.SIGTERM
+
+    def test_timeout_loop_exits_when_heartbeat_stale(self, monkeypatch):
+        """timeout 模式 last_heartbeat 已停超過 30s → 呼叫 os.kill SIGTERM。"""
+        import signal
+        import app as app_module
+
+        kill_calls = []
+        monkeypatch.setattr(app_module, "_last_heartbeat", 50.0)
+        monkeypatch.setattr("time.time", lambda: 100.0)
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        monkeypatch.setattr("os.kill", lambda pid, sig: kill_calls.append((pid, sig)))
+
+        app_module._run_timeout_watchdog()
+
+        assert len(kill_calls) == 1
+        assert kill_calls[0][1] == signal.SIGTERM
+
+    def test_timeout_loop_skips_when_heartbeat_none(self, monkeypatch):
+        """timeout 模式 last_heartbeat=None → continue，不應退出（向下相容）。"""
+        import app as app_module
+
+        sleep_count = [0]
+        kill_calls = []
+
+        def fake_sleep(_):
+            sleep_count[0] += 1
+            if sleep_count[0] >= 3:
+                raise RuntimeError("STOP_LOOP")
+
+        monkeypatch.setattr(app_module, "_last_heartbeat", None)
+        monkeypatch.setattr("time.time", lambda: 100.0)
+        monkeypatch.setattr("time.sleep", fake_sleep)
+        monkeypatch.setattr("os.kill", lambda pid, sig: kill_calls.append((pid, sig)))
+
+        with pytest.raises(RuntimeError, match="STOP_LOOP"):
+            app_module._run_timeout_watchdog()
+
+        assert kill_calls == []
+
+
+class TestExitDueTo:
+    """_exit_due_to 的程式碼層驗證：對當前 pid 送 SIGTERM。
+
+    跨平台說明：Windows 上 SIGTERM 會被 Python runtime 映射到 TerminateProcess，
+    本測試僅驗證程式碼確實呼叫 os.kill(getpid, SIGTERM)，不驗 OS 實際終止行為。
+    """
+
+    def test_exit_due_to_sends_sigterm_to_current_pid(self, monkeypatch, capsys):
+        import os
+        import signal
+        import app as app_module
+
+        kill_calls = []
+        monkeypatch.setattr("os.kill", lambda pid, sig: kill_calls.append((pid, sig)))
+
+        app_module._exit_due_to("測試訊息")
+
+        assert kill_calls == [(os.getpid(), signal.SIGTERM)]
+        captured = capsys.readouterr()
+        assert "測試訊息" in captured.out
+        assert "自動退出" in captured.out
+
+
+class TestStartWatchdogNormalization:
+    """start_watchdog 對 env 字串的容錯：大小寫、前後空白、空字串、None。"""
+
+    @pytest.mark.parametrize("input_mode,expected", [
+        ("PAGE_CLOSED", "page_closed"),
+        ("Page_Closed", "page_closed"),
+        ("  page_closed  ", "page_closed"),
+        ("TIMEOUT", "timeout"),
+        ("Timeout", "timeout"),
+        ("  timeout\n", "timeout"),
+        ("", "page_closed"),
+        (None, "page_closed"),
+    ])
+    def test_start_watchdog_normalizes_input(self, input_mode, expected):
+        """各種輸入都應 normalize 或 fallback 至預設模式。"""
+        import unittest.mock as mock
+        from app import start_watchdog
+        with mock.patch("app.threading.Thread") as mock_thread:
+            mock_thread.return_value = mock.MagicMock()
+            _, normalized = start_watchdog(input_mode)
+            assert normalized == expected
+            mock_thread.return_value.start.assert_called_once()
+
+
 class TestIntegration:
     """模擬完整上傳流程（像前端 fetch 呼叫）。"""
 
