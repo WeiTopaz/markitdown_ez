@@ -220,13 +220,13 @@ class TestWatchdogModes:
         start_ts = now - 70
         assert _should_exit_page_closed(now, start_ts, None) is True
 
-    def test_page_closed_after_grace_stale_heartbeat_exits(self):
-        """寬限期過後 ping 已停超過 30 秒 → 應退出。"""
+    def test_page_closed_after_grace_stale_heartbeat_skips(self):
+        """page_closed 模式曾收到 ping 後不因 stale heartbeat 退出，避免瀏覽器 timer 節流誤關。"""
         from app import _should_exit_page_closed
         now = 1000.0
         start_ts = now - 120  # 早就過寬限期
         last_hb = now - 45    # 上次 ping 在 45 秒前，超過 30 秒閾值
-        assert _should_exit_page_closed(now, start_ts, last_hb) is True
+        assert _should_exit_page_closed(now, start_ts, last_hb) is False
 
     def test_page_closed_after_grace_fresh_heartbeat_skips(self):
         """寬限期過後 ping 仍新鮮（5 秒前）→ 不應退出。"""
@@ -336,22 +336,29 @@ class TestWatchdogLoop:
         assert sleep_count[0] == 3
         assert kill_calls == []
 
-    def test_page_closed_loop_exits_when_heartbeat_stale(self, monkeypatch):
-        """grace 後曾收過 ping 但已停超過 30s：應退出。"""
-        import signal
+    def test_page_closed_loop_skips_when_heartbeat_stale(self, monkeypatch):
+        """grace 後曾收過 ping 即視為頁面已開啟；stale heartbeat 不應讓 page_closed 模式退出。"""
         import app as app_module
 
+        sleep_count = [0]
         kill_calls = []
+
+        def fake_sleep(_):
+            sleep_count[0] += 1
+            if sleep_count[0] >= 3:
+                raise RuntimeError("STOP_LOOP")
+
         monkeypatch.setattr(app_module, "_service_start_ts", 0.0)
         monkeypatch.setattr(app_module, "_last_heartbeat", 50.0)  # 50s 前 ping
         monkeypatch.setattr("time.time", lambda: 100.0)            # 距 ping 50s > 30s
-        monkeypatch.setattr("time.sleep", lambda s: None)
+        monkeypatch.setattr("time.sleep", fake_sleep)
         monkeypatch.setattr("os.kill", lambda pid, sig: kill_calls.append((pid, sig)))
 
-        app_module._run_page_closed_watchdog()
+        with pytest.raises(RuntimeError, match="STOP_LOOP"):
+            app_module._run_page_closed_watchdog()
 
-        assert len(kill_calls) == 1
-        assert kill_calls[0][1] == signal.SIGTERM
+        assert sleep_count[0] == 3
+        assert kill_calls == []
 
     def test_timeout_loop_exits_when_heartbeat_stale(self, monkeypatch):
         """timeout 模式 last_heartbeat 已停超過 30s → 呼叫 os.kill SIGTERM。"""
@@ -494,9 +501,11 @@ class TestIntegration:
         assert "convertBtn" in html
         assert "resultCard" in html
         assert "downloadBtn" in html
+        assert "shutdownBtn" in html
         assert "purify.min.js" in html  # DOMPurify 載入
         assert "/formats" in html       # 動態載入格式
         assert "/convert" in html       # 轉換端點
+        assert "fetch(\"/shutdown\", { method: \"POST\" })" in html
         # Bug fix: renderedContent 獨立節點必須存在，
         # 確保 showResult("rendered") 不會銷毀 rawContent DOM 節點
         assert 'id="renderedContent"' in html

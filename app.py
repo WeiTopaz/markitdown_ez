@@ -24,7 +24,7 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_SIZE_BYTES  # Flask 上傳限制
 WATCHDOG_GRACE_SECONDS = 60
 # 每 N 秒輪詢一次。
 WATCHDOG_POLL_SECONDS = 10
-# 上次 ping 距今超過此秒數視為心跳已停。
+# timeout 模式中，上次 ping 距今超過此秒數視為心跳已停。
 WATCHDOG_TIMEOUT_SECONDS = 30
 
 WATCHDOG_MODE_PAGE_CLOSED = "page_closed"
@@ -141,8 +141,8 @@ def too_large(e):
 
 # ---------- Graceful Shutdown ----------
 
-# None 表示「服務啟動以來從未收到任何 /heartbeat」，是 page_closed 模式判斷
-# 「網頁從未開啟」的關鍵訊號。timeout 模式遇到 None 時應 skip，避免 None - float。
+# None 表示「服務啟動以來從未收到任何 /heartbeat」。page_closed 模式只用它判斷
+# 「網頁從未開啟」；timeout 模式遇到 None 時應 skip，避免 None - float。
 _last_heartbeat = None
 # 服務啟動時間，由 start_watchdog 設定；用於 page_closed 模式的寬限期判斷。
 _service_start_ts = None
@@ -175,13 +175,12 @@ def _should_exit_page_closed(now, start_ts, last_heartbeat):
     - 啟動寬限期內（now - start_ts < WATCHDOG_GRACE_SECONDS）一律不退，
       避免使用者啟動服務但瀏覽器尚未送出第一次 ping 就被誤關。
     - 寬限期過後若 last_heartbeat 仍為 None → 視同網頁從未開啟＝已關閉。
-    - 寬限期過後若 last_heartbeat 距今超過 WATCHDOG_TIMEOUT_SECONDS → 網頁已關。
+    - 只要曾收到 heartbeat，就不因 heartbeat stale 退出；瀏覽器背景節流或
+      系統睡眠可能延後前端 timer，不能代表頁面已關閉。
     """
     if now - start_ts < WATCHDOG_GRACE_SECONDS:
         return False
-    if last_heartbeat is None:
-        return True
-    return (now - last_heartbeat) > WATCHDOG_TIMEOUT_SECONDS
+    return last_heartbeat is None
 
 
 def _should_exit_timeout(now, last_heartbeat):
@@ -201,17 +200,11 @@ def _exit_due_to(reason):
 
 
 def _run_page_closed_watchdog():
-    """page_closed 模式 loop：寬限期 + 偵測網頁從未開啟或已關閉。"""
+    """page_closed 模式 loop：寬限期後只偵測網頁從未開啟。"""
     while True:
         time.sleep(WATCHDOG_POLL_SECONDS)
-        now = time.time()
-        if now - _service_start_ts < WATCHDOG_GRACE_SECONDS:
-            continue
-        if _last_heartbeat is None:
+        if _should_exit_page_closed(time.time(), _service_start_ts, _last_heartbeat):
             _exit_due_to("偵測到網頁未開啟")
-            return
-        if (now - _last_heartbeat) > WATCHDOG_TIMEOUT_SECONDS:
-            _exit_due_to("偵測到網頁已關閉")
             return
 
 

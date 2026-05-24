@@ -284,8 +284,32 @@ footer {
   padding-top: 2rem;
   font-size: .75rem;
   color: var(--text-sub);
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 footer a { color: var(--accent); text-decoration: none; }
+.footer-shutdown {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-sub);
+  border-radius: 8px;
+  padding: .35rem .65rem;
+  font: inherit;
+  cursor: pointer;
+}
+.footer-shutdown:hover:not(:disabled),
+.footer-shutdown:focus-visible {
+  border-color: var(--danger);
+  color: var(--danger);
+  outline: none;
+}
+.footer-shutdown:disabled {
+  opacity: .65;
+  cursor: default;
+}
 </style>
 </head>
 <body>
@@ -339,7 +363,8 @@ footer a { color: var(--accent); text-decoration: none; }
 </div>
 
 <footer>
-  Powered by <a href="https://github.com/microsoft/markitdown" target="_blank" rel="noopener">markitdown</a>
+  <span>Powered by <a href="https://github.com/microsoft/markitdown" target="_blank" rel="noopener">markitdown</a></span>
+  <button type="button" class="footer-shutdown" id="shutdownBtn">關閉服務</button>
 </footer>
 
 <script>
@@ -363,6 +388,7 @@ footer a { color: var(--accent); text-decoration: none; }
   const rawContent      = document.getElementById("rawContent");
   const renderedContent = document.getElementById("renderedContent");
   const downloadBtn = document.getElementById("downloadBtn");
+  const shutdownBtn = document.getElementById("shutdownBtn");
   const formatBadges = document.getElementById("formatBadges");
 
   let selectedFile = null;
@@ -692,10 +718,22 @@ footer a { color: var(--accent); text-decoration: none; }
     navigator.sendBeacon("/shutdown");
   });
 
-  /* 方案 B: 每 15s ping /heartbeat，讓後端知道前端還活著 */
-  setInterval(() => {
+  /* 方案 B: ping /heartbeat，讓後端知道前端曾成功開啟 */
+  const sendHeartbeat = () => {
     fetch("/heartbeat", { method: "POST" }).catch(() => {});
-  }, 15000);
+  };
+  sendHeartbeat();
+  setInterval(sendHeartbeat, 15000);
+
+  shutdownBtn.addEventListener("click", async () => {
+    shutdownBtn.disabled = true;
+    shutdownBtn.textContent = "服務關閉中...";
+    try {
+      await fetch("/shutdown", { method: "POST" });
+    } catch (_) {
+      navigator.sendBeacon("/shutdown");
+    }
+  });
 
   /* ---------- Download ---------- */
   downloadBtn.addEventListener("click", () => {
