@@ -122,8 +122,8 @@ app = BUNDLE(
     bundle_identifier="com.markitdown.ez",
     info_plist={
         "NSHighResolutionCapable": True,
-        "CFBundleShortVersionString": "1.0.0",
-        "CFBundleVersion": "1.0.0",
+        "CFBundleShortVersionString": "1.0.2",
+        "CFBundleVersion": "1.0.2",
         "LSUIElement": False,  # 顯示在 Dock
         "NSAppTransportSecurity": {
             "NSAllowsLocalNetworking": True,

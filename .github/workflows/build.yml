@@ -1,0 +1,106 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run pytest
+        run: python -m pytest tests/ -v
+
+  build-mac:
+    name: Build macOS (.app)
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+      - name: Build with PyInstaller
+        run: pyinstaller markitdown_ez.spec --noconfirm --clean
+      - name: Zip .app bundle
+        run: |
+          cd dist
+          zip -r ../MarkItDown-EZ-mac.zip "MarkItDown EZ.app"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MarkItDown-EZ-mac
+          path: MarkItDown-EZ-mac.zip
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows (.exe)
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+      - name: Build with PyInstaller
+        run: pyinstaller markitdown_ez.spec --noconfirm --clean
+      - name: Zip output folder
+        shell: pwsh
+        run: Compress-Archive -Path 'dist\MarkItDown EZ' -DestinationPath 'MarkItDown-EZ-win.zip' -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MarkItDown-EZ-win
+          path: MarkItDown-EZ-win.zip
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs:
+      - build-mac
+      - build-windows
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: MarkItDown-EZ-mac
+          path: artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: MarkItDown-EZ-win
+          path: artifacts
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/MarkItDown-EZ-mac.zip
+            artifacts/MarkItDown-EZ-win.zip
